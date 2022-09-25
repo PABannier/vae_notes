@@ -1,0 +1,310 @@
+\documentclass[12pt]{article}
+
+\usepackage{hyperref}
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage[french,english]{babel}
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+
+\usepackage{natbib}
+
+% Ecriture des maths
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{amssymb}
+
+% For algorithms
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage[titlenumbered,ruled,noend,algo2e]{algorithm2e}
+\newcommand\mycommfont[1]{\footnotesize\ttfamily\textcolor{blue}{#1}}
+\SetCommentSty{mycommfont}
+\SetEndCharOfAlgoLine{}
+
+\usepackage{stmaryrd} % for llbracket and rrbracket
+\usepackage{booktabs}  % for \toprule and \midrule
+\usepackage{enumitem}
+
+% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage{graphicx} % For figures
+\graphicspath{{images/}, {prebuiltimages/}, {srcimages/}}
+% % added by Quentin for subplots
+\usepackage{subcaption}
+
+% Improve hyperref link formating
+\usepackage{color}
+\definecolor{linkcolor}{RGB}{83,83,182}
+\definecolor{citecolor}{RGB}{128,0,128}
+\hypersetup{
+    colorlinks=true,
+    citecolor=citecolor,
+    linkcolor=linkcolor,
+    urlcolor=linkcolor
+}
+
+\usepackage[capitalise,nameinlink]{cleveref} %mm always import this one last, weird conflicts can happen otherwise
+
+\usepackage{fullpage}
+
+\setlength{\parskip}{1em}
+
+\Crefname{equation}{Eq.}{Eqs.}
+\Crefname{figure}{Fig.}{Figs.}
+\Crefname{table}{Tab.}{Tabs.}
+\Crefname{algorithm}{Alg.}{Algs.}
+\Crefname{appendix}{App.}{Apps.}
+
+\newtheorem{theorem}{Theorem}
+
+\newcommand*\diff{\mathop{}\!\mathrm{d}}
+\newcommand*\Diff[1]{\mathop{}\!\mathrm{d^#1}}
+\newcommand*\KL{\mathop{}\!\mathbb{KL}}
+\newcommand*\iif{\mathop{}\!\Longleftrightarrow}
+
+\makeatletter
+\newcommand{\@giventhatstar}[2]{\left(#1\;\middle|\;#2\right)}
+\newcommand{\@giventhatnostar}[3][]{#1(#2\;#1|\;#3#1)}
+\newcommand{\giventhat}{\@ifstar\@giventhatstar\@giventhatnostar}
+\makeatother
+
+\begin{document}
+
+\begin{center}
+    \LARGE
+    Variational auto-encoders
+\end{center}
+
+\section{Introduction}
+
+Variational autoencoders (VAE) are generative latent variable models.
+In statistics, latent variables are hidden variables in the sense that they are not directly observed but are rather inferred through a mathematical model from other variables that are observed.
+The goal of a generative model is to construct a model that samples from a (high-dimensional) distribution $P$.
+Generative models usually face 3 main issues:
+%
+\begin{enumerate}
+    \item Strong assumptions have to be made on the structure of the data.
+    \item Models use severe approximations which lead to suboptimal results.
+    \item They have computationally expensive inference procedures (e.g. MCMC).
+\end{enumerate}
+%
+To circumvent these issues, powerful function approximators can be trained via backpropagation with a lot of samples.
+These function approximators are typically neural networks, a class of statistical models proved to be universal approximators under mild assumptions.
+
+\section{Mathematical framework and notations}
+%
+\subsection{Hypotheses}
+%
+A sample $X$ lives in the input space $\mathcal{X}$.
+The objective of generative model is to sample from $P(x)$.
+VAE have latent variables $z$ living in a latent space $\mathcal{Z}$, with $P(z)$ a distribution we can easily sample from.
+VAE being a parametric statistical model, we denote by $\Theta$ the parameter space.
+%
+VAEs belong to a family of deterministic functions parametrized by $\theta \in \Theta$
+%
+\begin{align}
+    \begin{split}
+    f : \mathcal{Z} \times \Theta &\rightarrow \mathcal{X} \\
+    f : (z; \theta) &\rightarrow x
+    \enspace .
+    \end{split}
+\end{align}
+%
+The problem we are solving with VAE is to choose $\theta \in \Theta$ such that $z \sim P(z)$ and $f(z;\theta)$ will be "like" $X$ with high probability.
+More formally, by the law of total probability, we are trying to maximize
+%
+\begin{equation}
+    \label{eq:law_tot_proba}
+    P(X) = \int_{\mathcal{Z}}
+    \underbrace{P(X \vert z; \theta)}_\textrm{likelihood}
+    \underbrace{P(z)}_\textrm{prior}
+    \diff z
+    \enspace .
+\end{equation}
+%
+The parameter vector $\theta \in \Theta$ is estimated using the maximum likelihood principle.
+That is, if the model is likely to produce training set samples, then it is likely to produce similar samples and unlikely to produce dissimilar ones.
+In VAEs, we assume that samples produced by the model are nearly like $z \in \mathcal{Z}$, that is
+%
+\begin{equation}
+    P(X \vert z, \theta) = \mathcal{N}(X \vert f(z;\theta), \sigma^2 I)
+    \enspace ,
+\end{equation}
+%
+with $\sigma$ some hypothesized noise level.
+%
+\subsection{A surrogate objective}
+%
+VAE are trained by optimizing $\theta \in \Theta$ via gradient descent to increase $P(X)$ by making $f(z;\theta)$ approach $X$ for some $z \in \mathcal{Z}$.
+Intuitively speaking, we are making the training data more likely under the generative model.
+This hints at some crucial properties for $f(z;\theta)$ to be optimized: it needs to be computable, continuous and differentiable in $\theta \in \Theta$.
+To solve \Cref{eq:law_tot_proba}, there remains 2 problems:
+%
+\begin{enumerate}
+    \item What is $z \in \mathcal{Z}$? How is it defined? What does it represent?
+    %
+    \item How to evaluate the integral over $\mathcal{Z}$?
+\end{enumerate}
+%
+
+\subsubsection{Defining latent variables}
+%
+A lot of information might and need to be encoded in $z \in \mathcal{Z}$, in order to generate a sample.
+VAE assume that $z \sim \mathcal{N}(0, I)$.
+First, since we do not have a general prior knowledge of how $z$ is distributed we prefer to use a prior maximizing entropy.
+Second, by inverse transform sampling, any $d$-dimensional distribution can be generated by taking a set of $d$ variables that are normally distributed and mapping them through a sufficiently complicated function.
+In the case of VAE, these functions are typically learnt by gradient descent and approximated by a neural network.
+For multi-layer neural networks, one can intuitively think that the first layers are used to map the normally distributed $z$'s to latent values, which can then be mapped to the sampling space.
+In other words, the neural network learns the latent structure on its own. Therefore,
+%
+\begin{equation}
+    P(X) = \int_{\mathcal{Z}}
+    P(X \vert z; \theta)
+    \mathcal{N}(z \vert 0, I)
+    \diff z
+    \enspace .
+\end{equation}
+
+\subsection{Sampling from $\mathcal{Z}$}
+%
+A naive way to estimate $P(X)$ is to use a Monte-Carlo sampling method, sampling from $P(z)$ and then applying $P(X) \approx \sum_z P(X \vert z; \theta)$.
+In practice, this is intractable as we need exponentially more samples as the dimension grows, an instance of the curse of dimensionality.
+Intuitively, one might realize that for most $z \in \mathcal{Z}, P(X \lvert z) \approx 0$.
+We cannot use a stronger prior on $z$, since it is assumed to be Gaussian.
+We need to find a way to select $z$ for which $P(X \lvert z)$ is high and compute $P(X)$ just from those.
+The solution is to use a new function $Q(z \lvert X)$ which can take a value $X \in \mathcal{X}$ and outputs a distribution over $\mathcal{Z}$ likely to produce $X \in \mathcal{X}$.
+Hopefully, the space of $z$ values likely under $Q$ is much smaller than the space of $z$ values likely under the prior $P(z)$.
+\\
+\\
+Now, that we have defined $Q$, we need to find some mathematical relationship between $P(X)$ and $\mathbb{E}_{z \sim Q}[P(X \vert z)]$.
+Remember that for $\theta \in \Theta$ and $z \in \mathcal{Z}$ fixed, $P(X \lvert z)$ is considered a random variable.
+Starting from Kullback-Leibler divergence between $P(X \lvert z)$ and $Q(z)$,
+%
+\begin{equation}
+    \KL(Q(z) \lvert\lvert P(z \lvert X)) =
+    \mathbb{E}_{z \sim Q}[
+        \log Q(z) - \log P(z \lvert X)
+    ]
+    \enspace .
+\end{equation}
+%
+Using Bayes' rule,
+%
+\begin{equation}
+    \KL(Q(z) \lvert\lvert P(z \lvert X)) =
+    \mathbb{E}_{z \sim Q}[
+        \log Q(z) - \log P(X \lvert z) - \log P(z)
+    ] + \log P(X)
+\end{equation}
+%
+\begin{equation}
+    \log P(X) - \KL(Q(z) \vert\vert P(z \vert X)) =
+    \mathbb{E}_{z \sim Q}[
+        \log P(X \vert z)
+        - \KL(Q(z) \vert\vert P(z))
+    ]
+    \enspace .
+\end{equation}
+%
+Since we are in making $Q$ dependent on $X$, we re-write the equation as
+%
+\begin{equation}
+    \label{eq:vae}
+    \underbrace{\log P(X) - \textcolor{blue}{\KL(Q(z \vert X) \vert\vert P(z \vert X))}}_\textrm{a quantity we'd like to maximize} =
+    \underbrace{\textcolor{red}{\mathbb{E}_{z \sim Q}[
+        \log P(X \vert z)
+    ]}
+    - \KL(Q(z \vert X) \vert\vert P(z))}_\textrm{a quantity optimizable via SGD}
+    \enspace .
+\end{equation}
+%
+\begin{enumerate}
+    \item The divergence $\textcolor{blue}{\KL(Q(z \vert X) \vert\vert P(z \vert X))}$ is an error term that makes $Q$ produce $z$ that can reproduce a given $X$.
+    It forces $Q(z \vert X)$ to be close to $P(z \vert X)$.
+    Assuming an arbitrarily high-capacity model, $Q(z \vert X)$ hopefully matches $P(z \vert X)$.
+    $P(z \vert X)$ describes the values of $z \in \mathcal{Z}$ that are likely to give rise to a sample like $X$ in our model.
+
+    \item The term $\textcolor{red}{\mathbb{E}_{z \sim Q}[\log P(X \vert z)]}$ is an encoder/decoder term: $z$ is produced from $X$ via $Q$ and we want to maximize the probability of occurrence of some $X$ given the sampled latent variable $z \in \mathcal{Z}$.
+\end{enumerate}
+%
+Now, we shall give a form to $Q(z \vert X)$.
+The usual choice for a VAE is
+%
+\begin{equation}
+    Q(z \vert X) = \mathcal{N}(z \vert \mu(X; \vartheta), \Sigma(X; \vartheta))
+    \enspace .
+\end{equation}
+%
+The choice of a Normal distribution is motivated by the fact that $\KL(Q(z \vert X) \vert\vert P(z))$ has a closed-form solution.
+%
+\begin{equation}
+    \KL(Q(z \vert X) \vert\vert P(z)) =
+    \frac{1}{2} \left(\mathrm{tr}(\Sigma(X))
+    + \mu(X)^{\top}\mu(X)
+    - k
+    - \log \mathrm{det}(\Sigma(X))
+    \right)
+\end{equation}
+%
+Now that we have a closed-form expression for the second term, we need to evaluate $\mathbb{E}_{z \sim Q}[\log P(X \vert z)]$.
+We can obtain an approximation of it by sampling from $P(z)$ and compute
+%
+\begin{equation}
+    \nabla_{\theta}
+    \left[
+        \log P(X \vert z)
+        - \KL(Q(z \vert X) \vert\vert P(z))
+    \right]
+    \enspace .
+\end{equation}
+%
+The issue here is that sampling from $P(z)$ is a \textbf{non-differentiable} operation, which prevents to backpropagate the loss to $\mu(X;\vartheta)$ and $\Sigma(X;\vartheta)$, which parametrizes $Q$.
+To circumvent this issue, we use a \textbf{reparametrization trick}. We sample $\epsilon \sim \mathcal{N}(0, I)$, then compute $z = \mu(X;\vartheta) + \Sigma^{—1/2}(X;\vartheta) \cdot \epsilon$.
+
+\subsection{Intepreting the objective}
+
+\subsubsection{The error term $\KL(Q(z \vert X) \vert\vert P(z \vert X))$}
+
+This error term is of utmost importance to ensure that our VAE samples from the correct distribution.
+%
+\begin{theorem}[Convergence to true distribution.]
+    Let $P(X)$ be the modelled distribution and $P^*(X)$ the true distribution.
+    Let $n$ be the number of samples $z \sim P(z)$, then 
+    \begin{equation}
+        P(X) \xrightarrow{\enskip \mathcal{L} \enskip} P^*(X) 
+        \iif
+        \KL(Q(z \vert X) \vert\vert P(z \vert X)) \rightarrow_{n\infty} 0
+        \enspace .
+    \end{equation}
+\end{theorem}
+%
+Intuitively, $\KL(Q(z \vert X) \vert\vert P(z \vert X))$ pulls our model of $P(X)$ towards parametrization that makes $P(z\vert X)$ Gaussian.
+
+\subsubsection{An interpretation from information theory}
+%
+\begin{enumerate}
+    \item $\KL(Q(z \vert X) \vert\vert P(z))$: expected information required to convert an uninformative sample from $P(z)$ to a sample from $Q(z \vert X)$.
+    It is the extra information that we get about $X$ when $z$ comes from $Q(z \vert X)$ instead of $P(z)$.
+
+    \item $P(X \vert z)$: amount of information required to reconstruct $X$ from $z$ with an ideal encoding.
+    
+    \item $-\log P(X)$: total number of bits required to construct $X$ given an ideal encoding using our model.
+\end{enumerate}
+%
+Therefore, using \Cref{eq:vae}, we notice that minimizing $-\log P(X)$ is a two-step process:
+%
+\begin{enumerate}
+    \item Use some bits to construct $z$ (minimize $\KL(Q(z \vert X) \vert\vert P(z))$)
+    
+    \item Use some bits to reconstruct $X$ from $z$ (minimize $P(X \vert z)$).
+\end{enumerate}
+%
+Finally, $\KL(Q(z \vert X) \vert\vert P(z))$ is a ``price'' we have to pay for $Q$ being a sub-optimal encoding.
+
+\end{document}
+%
+
