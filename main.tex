@@ -50,6 +50,8 @@
 \usepackage[capitalise,nameinlink]{cleveref} %mm always import this one last, weird conflicts can happen otherwise
 
 \usepackage{fullpage}
+\usepackage{mathtools}
+\usepackage{natbib}
 
 \setlength{\parskip}{1em}
 
@@ -72,14 +74,217 @@
 \newcommand{\giventhat}{\@ifstar\@giventhatstar\@giventhatnostar}
 \makeatother
 
+\DeclarePairedDelimiterX{\infdivx}[2]{(}{)}{%
+  #1\;\delimsize\|\;#2%
+}
+\newcommand{\infdiv}{\KL\infdivx}
+
+\bibliographystyle{plain}
+
 \begin{document}
+
 
 \begin{center}
     \LARGE
-    Variational auto-encoders
+    Variational Bayesian inference
 \end{center}
 
-\section{Introduction}
+
+\section{Variational inference}
+
+Consider the inference problem where we want to approximate some true posterior distribution $p^*(X) = p(X \vert \mathcal{D})$, $\mathcal{D}$ being the dataset.
+The basic idea of variational inference is to pick an approximation $q(X)$ to the true distribution from a suited family of distributions, and to make this approximation as close as possible from the true posterior.
+This reduces \textbf{inference} to an \textbf{optimization} problem.
+Variational inference often gives us the speed benefits of MAP estimation but the statistical benefits of the Bayesian approach.
+
+\section{Mathematical framework and notations}
+
+\subsection{Hypotheses}
+
+A sample $X$ lives in the input space $\mathcal{X}$.
+The objective of a generative model is to sample from $P(X)$.
+Variational bayesian models have latent variables $z$ living in a latent space $\mathcal{Z}$, with $P(z)$ a distribution we can easily sample from.
+We denote by $\Theta$ the parameter space.
+%
+% VAEs belong to a family of deterministic functions parametrized by $\theta \in \Theta$
+% %
+% \begin{align}
+%     \begin{split}
+%     f : \mathcal{Z} \times \Theta &\rightarrow \mathcal{X} \\
+%     f : (z; \theta) &\rightarrow x
+%     \enspace .
+%     \end{split}
+% \end{align}
+%
+% The problem we are solving with VAE is to choose $\theta \in \Theta$ such that $z \sim P(z)$ and $f(z;\theta)$ will be "like" $X$ with high probability.
+% More formally, by the law of total probability, we are trying to maximize
+%
+We use the law of total probability to have an expression of $p(X)$:
+%
+\begin{equation}
+    \label{eq:law_tot_proba}
+    p(X) = \int_{\mathcal{Z}}
+    \underbrace{p(X \vert z)}_{\textrm{likelihood}}
+    \underbrace{p(z)}_\textrm{prior}
+    \diff z
+    \enspace .
+\end{equation}
+%
+% The parameter vector $\theta \in \Theta$ is estimated using the maximum likelihood principle.
+% That is, if the model is likely to produce training set samples, then it is likely to produce similar samples and unlikely to produce dissimilar ones.
+
+\subsection{Mean-field variational Bayes}
+
+Consider a parametrized likelihood function $q_\phi$.
+Mean-field variational Bayes uses the Reverse Kullback-Leibler divergence as a metric between two distributions:
+%
+\begin{equation}
+    \label{eq:reverse_kl}
+    \infdiv{q_\phi(z \vert X)}{p(z \vert X)} = 
+    \sum_{z \in \mathcal{Z}}
+    q_\phi(z \vert X)
+    \log
+    \frac{q_\phi(z \vert X)}{p(z \vert X)}
+    \enspace .
+\end{equation}
+%
+Although it does not define a distance in some distribution space, it is still a quantity we would like to minimize.
+It is the amount of information required to ``distort'' $p(z \vert X)$ into $q_\phi(z \vert X)$, which ideally we would like to be small.
+The following form makes it more tractable for an optimization algorithm:
+%
+\begin{align}
+    \infdiv{q_\phi(z \vert X)}{p(z \vert X)} &= 
+    \sum_{z \in \mathcal{Z}}
+    q_\phi(z \vert X)
+    \log
+    \frac{q_\phi(z \vert X) p(X)}{p(z, X)} \\
+    %
+    &= \sum_{z \in \mathcal{Z}}
+    q_\phi(z \vert X)
+    \log
+    \frac{q_\phi(z \vert X)}{p(z, X)}
+    +
+    \sum_{z \in \mathcal{Z}}
+    q_\phi(z \vert X)
+    \log p(X) \\
+    %
+    &= \log p(X)
+    + \sum_{z \in \mathcal{Z}}
+    q_\phi(z \vert X)
+    \log
+    \frac{q_\phi(z \vert X)}{p(z, X)}
+    \enspace .
+\end{align} 
+%
+Therefore,
+%
+\begin{equation}
+    \arg \min_\phi \infdiv{q_\phi(z \vert X)}{p(z \vert X)} 
+    = 
+    \arg \min_\phi
+    \sum_{z \in \mathcal{Z}}
+    q_\phi(z \vert X)
+    \log
+    \frac{q_\phi(z \vert X)}{p(z, X)}
+    \enspace . 
+\end{equation}
+
+The divergence is still not in a tractable form since we need to evaluate $p(z, X)$.
+
+\begin{align}
+    \sum_{z \in \mathcal{Z}}
+    q_\phi(z \vert X)
+    \log
+    \frac{q_\phi(z \vert X)}{p(z, X)} &=
+    \mathbb{E}_{z \sim q_\phi (z \vert X)}
+    \left[
+        \log \frac{q_\phi(z \vert X)}{p(z, X)}
+    \right] \\
+    %
+    &= \mathbb{E}_{q_\phi} \left[
+        \log q_\phi(z \vert X) - \log p(X, z)
+    \right] \\
+    &= \mathbb{E}_{q_\phi} \left[
+        \log q_\phi(z \vert X) - \log p(X \vert z) - \log p(z)
+    \right]
+\end{align}
+%
+While computer software typically \textbf{minimizes} an objective function, we will write the equivalent maximization problem:
+%
+\begin{align}
+    \label{eq:var_low_bound}
+    \max_\phi \mathcal{L}(\phi) &=
+    - \mathbb{E}_{q_\phi} \left[
+        \log q_\phi(z \vert X) - \log p(X \vert z) - \log p(z)
+    \right] \\
+    &= \mathbb{E}_{q_\phi} \left[
+        \log p(X \vert z)
+        + \log \frac{p(z)}{q_\phi(z \vert X)}
+    \right] \\
+    &= \mathbb{E}_{q_\phi} \left[
+        \log p(X \vert z)
+    \right] +
+    \sum_{z \in \mathcal{Z}}
+    q_\phi(z \vert X) \log \frac{p(z)}{q_\phi(z \vert X)} \\
+    &= \mathbb{E}_{q_\phi} \left[
+        \log p(X \vert z)
+    \right] -
+    \infdiv{q_\phi(z \vert X)}{p(z)}
+    \enspace .
+\end{align}
+%
+Plugging back $\mathcal{L}$ into \Cref{eq:reverse_kl}, we get
+%
+\begin{align}
+    \begin{split}
+    \infdiv{q_\phi(z \vert X)}{p(z \vert X)} &=
+    \log p(X) - \mathcal{L} \\
+    %
+    \log p(X) &= \mathcal{L} +
+    \infdiv{q_\phi(z \vert X)}{p(z \vert X)} 
+    \enspace .
+    \end{split}
+\end{align} 
+%
+Since $\infdiv{q_\phi(z \vert X)}{p(z \vert X)} \geq 0$, $\log p(X) \geq \mathcal{L}$, making $\mathcal{L}$ a lower bound for $\log p(X)$.
+This bound is called the \textbf{variational lower bound} (or \textbf{evidence lower bound}, ELBO).
+
+\subsection{Forward KL vs. Reverse KL}
+
+As stated previously, the Kullback-Leibler (KL) divergence is not symmetric, hence does not define a distance on metric spaces.
+Minimizing the forward or the reverse KL will lead to different behavior.
+Mean-field variational Bayes uses reverse KL instead of forward KL.
+Why?
+%
+The forward KL divergence reads
+%
+\begin{equation}
+    \label{eq:forward_kl_divergence}
+    \infdiv{p(z \vert X)}{q_\phi(z \vert X)} = 
+    \sum_{z \in \mathcal{Z}}
+    p(z \vert X)
+    \log
+    \frac{p(z \vert X)}{q_\phi(z \vert X)}
+    \enspace .
+\end{equation}
+%
+First, \Cref{eq:forward_kl_divergence} cannot be evaluated since we need to compute $p(z \vert X)$, which we don't know yet.
+There is an even more fundamental reason to explain we prefer the reverse divergence to the forward.
+\\
+\\
+As argued by \cite{PML_Murphy}, \Cref{eq:reverse_kl} is infinite if $p(z \vert X) = 0$ and $q_\phi(z \vert X) > 0$.
+Thus, to be minimized, \Cref{eq:reverse_kl} will ensure that when $p(z \vert X)= 0$, $q_\phi(z \vert X) = 0$.
+The reverse KL is \textbf{zero forcing} for $q_\phi$.
+Conversely, \Cref{eq:forward_kl_divergence} is infinite if $q_\phi(z \vert X) = 0$ and $p(z \vert X) > 0$.
+To be minimized, \Cref{eq:forward_kl_divergence} will ensure that when $q_\phi(z \vert X) = 0$, $p(z \vert X) > 0$. 
+The forward KL is \textbf{zero avoiding} for $q_\phi$.
+Hence $q_\phi$ will under-estimate the support of $p$.
+\\
+\\
+When the true distribution is multimodal (which is almost always the case in high-dimensional case), using the forward KL is a bad idea, since the resulting posterior mode/mean will be in a region of low density, right between the two peaks.
+In such contexts, the reverse KL is more sensible statistically.
+
+\section{Variational auto-encoders}
 
 Variational autoencoders (VAE) are generative latent variable models.
 In statistics, latent variables are hidden variables in the sense that they are not directly observed but are rather inferred through a mathematical model from other variables that are observed.
@@ -95,39 +300,6 @@ Generative models usually face 3 main issues:
 To circumvent these issues, powerful function approximators can be trained via backpropagation with a lot of samples.
 These function approximators are typically neural networks, a class of statistical models proved to be universal approximators under mild assumptions.
 
-\section{Mathematical framework and notations}
-%
-\subsection{Hypotheses}
-%
-A sample $X$ lives in the input space $\mathcal{X}$.
-The objective of generative model is to sample from $P(x)$.
-VAE have latent variables $z$ living in a latent space $\mathcal{Z}$, with $P(z)$ a distribution we can easily sample from.
-VAE being a parametric statistical model, we denote by $\Theta$ the parameter space.
-%
-VAEs belong to a family of deterministic functions parametrized by $\theta \in \Theta$
-%
-\begin{align}
-    \begin{split}
-    f : \mathcal{Z} \times \Theta &\rightarrow \mathcal{X} \\
-    f : (z; \theta) &\rightarrow x
-    \enspace .
-    \end{split}
-\end{align}
-%
-The problem we are solving with VAE is to choose $\theta \in \Theta$ such that $z \sim P(z)$ and $f(z;\theta)$ will be "like" $X$ with high probability.
-More formally, by the law of total probability, we are trying to maximize
-%
-\begin{equation}
-    \label{eq:law_tot_proba}
-    P(X) = \int_{\mathcal{Z}}
-    \underbrace{P(X \vert z; \theta)}_\textrm{likelihood}
-    \underbrace{P(z)}_\textrm{prior}
-    \diff z
-    \enspace .
-\end{equation}
-%
-The parameter vector $\theta \in \Theta$ is estimated using the maximum likelihood principle.
-That is, if the model is likely to produce training set samples, then it is likely to produce similar samples and unlikely to produce dissimilar ones.
 In VAEs, we assume that samples produced by the model are nearly like $z \in \mathcal{Z}$, that is
 %
 \begin{equation}
@@ -305,6 +477,7 @@ Therefore, using \Cref{eq:vae}, we notice that minimizing $-\log P(X)$ is a two-
 %
 Finally, $\KL(Q(z \vert X) \vert\vert P(z))$ is a ``price'' we have to pay for $Q$ being a sub-optimal encoding.
 
+\bibliography{biblio}
 \end{document}
 %
 
